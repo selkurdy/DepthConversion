@@ -1,3 +1,14 @@
+"""
+Depth conversion using quadratic equation
+
+
+python ztqsegy.py time1300.txt --datacols 1 2 3 --datahdrlines 1 --qcfilename time1300.txt --qccols 1 2 6 7 8
+
+python ztqsegy.py aix.sgy --datafiletype segy --qcoefs 0 4740 3440
+
+python ztqsegy.py aix.sgy --datafiletype segy --qcfilename time1300_tcqf.txt --qccols 0 1 6 7 8 --outrange 0 12000
+"""
+
 import sys, os.path
 import argparse
 import numpy as np
@@ -11,126 +22,6 @@ from datetime import datetime
 
 
 
-"""
-Depth conversion using quadratic equation
-
-5/Mar/2012 11:25 : created zqcon.py
-10/Mar/2012 20:49 : added time conversion
-
-+Sample input file: k1tx3.lst
-   503872.34   2925323.47       1602
-   504870.21   2924325.58       1593
-   505868.09   2925323.47       1582
-   506865.96   2928317.12       1577
-   506865.96   2925323.47       1575
-   506865.96   2922329.81       1592
-   507863.83   2927319.24       1571
-   507863.83   2924325.58       1567
-
-+Sample coefficient file: qcoef.dat
-   571199.80    2919956.00     -43.385    7719.345    6801.382       0.000    7520.170    7005.920            NF-4A      0.026       0.754         131        9665
-   567835.30    2937475.50     -96.197    8094.850    6135.446       0.000    7663.217    6568.652             NF-5      0.026       0.771         130        9819
-   594051.20    2834248.00     191.077    7404.620    7306.613       0.000    8243.639    6484.981           NF-6AA      0.017       0.791          87       10688
-   602468.00    2928893.00    -269.791    7509.786    7394.564       0.000    6346.340    8546.043            NFB-1      0.035       0.755         179        9576
-   607200.90    2926207.00      77.392    6634.064    7452.582       0.000    6966.907    7126.673           NFB-19      0.036       0.774         181        9710
-   607206.70    2926206.10     -61.118    6949.164    7326.107       0.000    6700.548    7560.820           NFB-25      0.036       0.777         182        9752
-   631608.00    2893358.00     109.695    6781.596    7002.654       0.000    7218.535    6606.951           NFD-1B      0.034       0.838         173       10759
-this file was generated from wvel.py
-
->python qzcon0.py -fk1tx3.lst  -q 0 1 2 3 4 -eqcoef.dat
-
-+ To time convert a depth file with spatially varying coef
-Sample input file : k1tz.dat
-   537800.00    2902372.09       0.667        8449        12668         155        7407        7539
-   537800.00    2899378.44       0.665        8492        12760         191        7170        7970
-   537800.00    2896384.78       0.658        8440        12816         222        6953        8391
-   538797.87    2964241.01       0.779        9558        12269         -92        7454        6332
-   538797.87    2961247.36       0.765        9351        12215         -82        7693        6047
-   538797.87    2958253.70       0.746        9021        12101         -85        7862        5838
-   538797.87    2955260.04       0.743        8988        12096         -86        7980        5696
-   538797.87    2952266.38       0.741        8957        12096         -86        8048        5623
-   538797.87    2949272.73       0.728        8768        12044         -85        8076        5610
-   538797.87    2946279.07       0.732        8868        12115         -73        8170        5525
-   538797.87    2943285.41       0.721        8747        12141         -65        8194        5604
-
-
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3 -t -eqcoef.dat -q 0 1 2 3 4
-
-+ To depth convert using a single function:
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3  -c 38 7052 6994
-
-
-+ To time convert using a single function:
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3 -t -c 38 7052 6994
-
-+using monte carlo simulation us -S standard deviation for 3 coefs and percentile to
-    compute at -P 0.15 and resample grid every 3rd value. Input data is in Surfer grid format
-C:\\Users\20504\sami\SEKDATA\wdata>python ztqmc.py -f 10REG_SUDSH_400X_grid.grd
--i surfer -c 0.000    7591.537    6573.168 -S 0.0 650 700 -T -2.0 2.0  -P 0.15
--G 3
-
-
-+input is zmap grid sampled every 2nd point
-C:\\Users\20504\sami\SEKDATA\wdata>python ztqmc.py -f 10REG_SUDSH_400X_grid.dat -
-i zmap -c 0.000    7591.537    6573.168 -S 0.0 650 700 -T -2.0 2.0  -P 0.90 -G 2
- >10REG_SUDSH_400X_grid_p90x2.lst
-
-
-+ztqmc.py has changed after that: triggering monte carlo by using -R
-
-+ depth conversion using monte carlo of a surfer grid
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -fsdtba.grd -i surfer
--c 0.000    7591.537    6573.168 -R -S 0.0 650 700 -T -2.0 2.0  -P 0.85 > t
-
-+time conversion using monte carlo. -F plotting of histograms does not show?? resulting
-    data seems ok.
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -f t -i xyz -c 0.000
-  7591.537    6573.168 -R -S 0.0 650 700 -T -2.0 2.0  -P 0.85 -t -F
-
-+straight time conversion
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -f t -i xyz -c 0.000
-  7591.537    6573.168 -t
-
-*** In depth conversion the input time is assumed t2way. The output is listed as t1w
-
-*** In time conversion the output is listed as t1way
-10/Mar/2012 21:06 done editing saved as qzcon.py
-11/Mar/2012 8:45: changed name to ztq.py
-28/Feb/2013 8:08 added t2w in ms to listing of both time and depth conversion
-    modified listing to be x y z t1w t2w vav ....
-19/Mar/2013 13:24  added onse space before listing in print to match to wvel.py output
-28/Apr/2013 8:10 added space to printing to mathch wvel.py listing
-28/Jan/2015 added surfer grid input and probability monte carlo
-    modified all functions to print internally and not return data
-    added input coef files from surfer grid
-29/Jan/2015: changed a lot of command line options. Added input zgrid for both data
-    and coef files.
-01 Feb 2015: added printing to stderr every 100 point. Changed # of mcruns to 250 only
-    added plotting of histogram and fitted pdf for every point. To exit use ctrl C
-09 Feb 2015: added -R to switch on Monte Carlo simulation
-    added discrete distribution of simulated zmc
-10 feb 2015: fitted a continous norm distribution to mc'd z and t
-    found the pctl from the norm distribution.
-    Plotting of depth conversion is OK but in time conversion is a problem?
-    data seems to convert both ways OK
-    
-*depth to time conversion with 1 qcoefs    
-python ztqmc.py time1300.txt --datahdrlines 1 --timeconvert --datafiletype xyz --datacols 1 2 4 --qcoefs 0 4750 3400    
-*time to depth conversion with 1 qcoefs
-python ztqmc.py time1300.txt --datahdrlines 1 --datafiletype xyz --datacols 1 2 3 --qcoefs 0 4750 3400    
-
-*time to depth conversion with quadratic coeffs file
-python ztqmc.py time1300.txt --datahdrlines 1  --datafiletype xyz --datacols 1 2 4 --qcfilename time1300.txt --qchdrlines 1 --qccols 1 2 6 7 8 --timeconvert
-
-*depth convert to time using quadratic coeffs file
-python ztqmc.py time1300.txt --datahdrlines 1  --datafiletype xyz --datacols 1 2 3 --qcfilename time1300.txt --qchdrlines 1 --qccols 1 2 6 7 8 
-
-python ztq.py time1300.txt --datacols 1 2 3 --datahdrlines 1 --qcfilename time1300.txt --qccols 1 2 6 7 8
-
-python ztqsegy.py aix.sgy --datafiletype segy --qcoefs 0 4740 3440
-
-python ztqsegy.py aix.sgy --datafiletype segy --qcfilename time1300_tcqf.txt --qccols 0 1 6 7 8 --outrange 0 12000   
-"""
 
 def quadeval(cf,xi):
     """
@@ -155,8 +46,8 @@ def quadeval(cf,xi):
     z=cf[0]+ cf[1]*xi + cf[2] * xi * xi
     return z
 
-    
-"""    
+
+"""
 def mc_quadroots_draw(cf0,cf1,cf2,xi):
     a0=st.norm(cf0,coefstd[0]).rvs()   #a0d for distribution
     a1=st.norm(cf1,coefstd[1]).rvs()
@@ -528,8 +419,8 @@ def datain(fname,cols,mltp,skiphdr=0,nskip=1):
     return xyarray,tarray
 
 
-    
-    
+
+
 def qcoefin(fname,qccols,skiphdr=0,nskip=1):
     xy=np.genfromtxt(fname,usecols=(qccols[0],qccols[1]),skip_header=skiphdr)
     qc=np.genfromtxt(fname,usecols=(qccols[2],qccols[3],qccols[4]),skip_header=skiphdr)
@@ -572,11 +463,11 @@ def listtconv(xy,t1w,z,a0,a1,a2):
     for i in range(z.size):
         print(" %12.2f  %12.2f  %10.0f  %10.3f   %10.0f  %10.0f  %10.0f  %10.0f " %\
         (xy[i,0],xy[i,1],z[i],t1w[i],t2w[i],vav[i],a0[i],a1[i],a2[i]))
-        
-        
-        
-        
-        
+
+
+
+
+
 def datain_kngdmflt(fname,mltp):
     kdf = pd.read_csv(fname,delim_whitespace=True,header = None)
     kdf.head()
@@ -599,10 +490,10 @@ def list_kngdmflt(fltfilename,xy,tc,segid,fltname):
            print('unspecified     0.0 {:.1f} {:.1f} {:.2f} {:} {:}   unspecified'
                     .format(xy[i,0],xy[i,1],tc[i],fltname[i],segid[i]),file=fp)
 
-                
-                
-                
-                
+
+
+
+
 def zconv1xyz(xy,t,qc,kflt=False):
     t1w = t /2000.0
     zc = np.array(t)
@@ -616,10 +507,10 @@ def zconv1xyz(xy,t,qc,kflt=False):
         zc[i]=quadeval(qc,t1w[i])
         vav[i] = zc[i]/t1w[i]
     return zc, vav
-        
-        
-        
-        
+
+
+
+
 def tconv1xyz(xy,z,qc,kflt=False):
     vav = np.array(z)
     t0 = np.array(z)
@@ -647,11 +538,11 @@ def segyzconvfile(xy,t,xyqc,qcoef):
     for i in range(1,t.size):
         zc[i]=quadeval([a0,a1,a2],t1w[i])
         vav[i] = zc[i]/t1w[i]
-        
+
     return zc, vav, a0, a1, a2
 
 
-    
+
 def segytconvfile(xy,z,xyqc,qcoef):
     a0=idw(xyqc,qcoef[:,0],xy)
     a1=idw(xyqc,qcoef[:,1],xy)
@@ -664,13 +555,13 @@ def segytconvfile(xy,z,xyqc,qcoef):
         t1w[i],t1=quadroots(a0,a1,a2,z[i])
         vav[i]=z[i]/t1w[i]
         # t2w= t0[i] * 2000.0
-        
+
     return t1w,vav,a0,a1,a2
 
-    
-    
-    
-    
+
+
+
+
 
 def zconvfile(xy,t,xyqc,qcoef):
     t1w =t/2000.0
@@ -679,7 +570,7 @@ def zconvfile(xy,t,xyqc,qcoef):
     a2list=idw(xyqc,qcoef[:,2],xy)
     zc=np.array(t)
     vav = np.array(t)
-    
+
     for i in range(xy[:,0].size):
         zc[i]=quadeval([a0list[i],a1list[i],a2list[i]],t1w[i])
         vav[i]=zc[i]/t1w[i]
@@ -696,10 +587,10 @@ def tconvfile(xy,z,xyqc,qcoef):
         t0,t1=quadroots(a0list[i],a1list[i],a2list[i],z[i])
         t1w[i]=t0
         vav[i]=z[i]/t1w[i]
-        
+
     return t1w,vav,a0list,a1list,a2list
 
-    
+
 def segyzconvqfile(xy,t,xy0,a0,xy1,a1,xy2,a2):
     t1w =t/2000.0
     a0=idw(xy0,a0,xy)
@@ -711,7 +602,7 @@ def segyzconvqfile(xy,t,xy0,a0,xy1,a1,xy2,a2):
     for i in range(1,t.size):
         zc[i]=quadeval([a0,a1,a2],t1w[i])
         vav[i] = zc[i]/t1w[i]
-        
+
     return zc,vav,a0,a1,a2
 
 
@@ -728,15 +619,15 @@ def segytconvqfile(xy,z,xy0,a0,xy1,a1,xy2,a2):
         t1w[i],t1=quadroots(a0,a1,a2,z[i])
         vav[i]=z[i]/t1w[i]
         # t2w= t1w[i] * 2000.0
-        
-        
+
+
     return t1w,vav,a0,a1,a2
 
 
-    
-    
-    
-    
+
+
+
+
 def zconvqfile(xy,t,xy0,a0,xy1,a1,xy2,a2):
     t1w =t/2000.0
     a0list=idw(xy0,a0,xy)
@@ -747,7 +638,7 @@ def zconvqfile(xy,t,xy0,a0,xy1,a1,xy2,a2):
     for i in range(xy[:,0].size):
         zc[i]=quadeval([a0list[i],a1list[i],a2list[i]],t1w[i])
         vav[i]=zc[i]/t1w[i]
-        
+
     return zc,vav,a0list,a1list,a2list
 
 
@@ -806,7 +697,7 @@ def getcommandline():
     parser.add_argument('--alinestoskip',default=1,type=int,help='for resampling a coefficients grid files only.default= 1')
     parser.add_argument('--agridmultipliers',nargs=3,type=float,default=(1.0,1.0,1.0),
             help='3 multipliers to a coefficients grid files. dfv= 1.0 1.0 1.0')
-            
+
 
     result=parser.parse_args()
     if not result.datafilename:
@@ -820,7 +711,7 @@ def getcommandline():
 def main():
     cmdl=getcommandline()
     #surfer grid in can have surfer grid out or zmap grid out
-        
+
 
     if cmdl.datafiletype =='segy':
         segyfname = cmdl.datafilename
@@ -835,8 +726,8 @@ def main():
                 outfnamec = os.path.join(dirsplit,fname) +"_ztq1f.sgy"
                 outvfnamec = os.path.join(dirsplit,fname) +"_vavq1f.sgy" # spatially varying q single file
             start_copy = datetime.now()
-            copyfile(segyfname, outfnamec) 
-            copyfile(segyfname, outvfnamec) 
+            copyfile(segyfname, outfnamec)
+            copyfile(segyfname, outvfnamec)
             end_copy = datetime.now()
             print('Duration of copying: {}'.format(end_copy - start_copy))
         elif cmdl.afiles: #3 coef files
@@ -861,8 +752,8 @@ def main():
                 outvfnamec = os.path.join(cmdl.dirsplit,fname) +"_vavq3f.sgy" #spatially varying q from 3 files
             print('Copying file, please wait ........')
             start_copy = datetime.now()
-            copyfile(segyfname, outfnamec) 
-            copyfile(segyfname, outvfnamec) 
+            copyfile(segyfname, outfnamec)
+            copyfile(segyfname, outvfnamec)
             end_copy = datetime.now()
             print('Duration of copying: {}'.format(end_copy - start_copy))
         else: # cmdl.qcoef only 1 set of a0 a1 a2
@@ -874,11 +765,11 @@ def main():
                 outvfnamec = os.path.join(dirsplit,fname) +"_vav1q.sgy"
             print('Copying file, please wait ........')
             start_copy = datetime.now()
-            copyfile(segyfname, outfnamec) 
-            copyfile(segyfname, outvfnamec) 
+            copyfile(segyfname, outfnamec)
+            copyfile(segyfname, outvfnamec)
             end_copy = datetime.now()
             print('Duration of copying: {}'.format(end_copy - start_copy))
-        
+
         with segyio.open(outfnamec, "r+" ,strict=False) as srcp, segyio.open(outvfnamec, "r+" ,strict=False) as srcv:
             mappedp = srcp.mmap()
             mappedv = srcv.mmap()
@@ -913,7 +804,7 @@ def main():
                         srcp.trace[trnum] = ti1d(zci).astype('float32')
                         ti1d = interpolate.interp1d(tc,vav,kind='cubic',bounds_error= False, fill_value =vav[-1])
                         srcv.trace[trnum] = ti1d(zci).astype('float32')
-                        
+
                     else:
                         zc,vav = zconv1xyz(xy,nta,cmdl.qcoefs)
                         zi1d = interpolate.interp1d(zc,tr,kind='cubic',bounds_error= False, fill_value =tr[0])
@@ -927,7 +818,7 @@ def main():
                         srcp.trace[trnum] = ti1d(zci).astype('float32')
                         ti1d = interpolate.interp1d(tc,vav,kind='cubic',bounds_error= False, fill_value =vav[-1])
                         srcv.trace[trnum] = ti1d(zci).astype('float32')
-                        
+
                     else:
                         zc,vav,q0,q1,q2 = segyzconvfile(xy,nta,xyqc,qcoef)
                         zi1d = interpolate.interp1d(zc,tr,kind='cubic',bounds_error= False, fill_value =tr[0])
@@ -947,7 +838,7 @@ def main():
                         srcp.trace[trnum] = zi1d(zci).astype('float32')
                         zi1d = interpolate.interp1d(zc,vav,kind='cubic',bounds_error= False, fill_value =vav[-1])
                         srcv.trace[trnum] = zi1d(zci).astype('float32')
-                    
+
             isample *= 1000
             segyio.tools.resample(srcp,rate=int(isample),micro=True)
             segyio.tools.resample(srcv,rate=int(isample),micro=True)
@@ -970,7 +861,7 @@ def main():
         elif cmdl.datafiletype =='xyz':  #xyz file in has to xyz file out
             xy,t=datain(cmdl.datafilename,cmdl.datacols,cmdl.multiplier,cmdl.datahdrlines,cmdl.dataresampleby)
             print("Number of non Null values %10d " %(t.shape), file=sys.stderr)
-        
+
             if cmdl.timeconvert:
                 horcols = ['X','Y','Z']
                 hordf = pd.DataFrame({'X':xy[:,0],'Y':xy[:,1],'Z':t})
@@ -980,7 +871,7 @@ def main():
             hordf = hordf[horcols].copy()
         elif cmdl.datafiletype == 'kngdmflt' :
             xy,t2w,segid,fltname = datain_kngdmflt(cmdl.datafilename,cmdl.multiplier)
-            
+
         if cmdl.qcoefs:
             if cmdl.datafiletype =='kngdmflt':
                 if cmdl.timeconvert:
@@ -993,18 +884,18 @@ def main():
                     fltfilename = fname +'_zconv.txt'
                     list_kngdmflt(fltfilename,xy,zc,segid,fltname)
                     print('Successfully saved {}'.format(fltfilename))
-            else:    
+            else:
                 if cmdl.timeconvert:
                     tc,vav = tconv1xyz(xy,t,cmdl.qcoefs)
                     hordf['T1W'] = tc
                     hordf['T2w'] = tc *2000.0
                     hordf['VAV'] = vav
-                    
-                    
+
+
                     hordf['T2W'] = hordf['T2W'].round(0)
                     hordf['T1W'] = hordf['T1W'].round(3)
                     hordf['VAV'] = hordf['VAV'].round(0)
-                    
+
                     tcfname = fname + '_tc.txt'
                     hordf.to_csv(tcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(tcfname))
@@ -1012,14 +903,14 @@ def main():
                     zc,vav = zconv1xyz(xy,t,cmdl.qcoefs)
                     hordf['Z'] = zc
                     hordf['VAV'] = vav
-                    
+
                     hordf['Z'] = hordf['Z'].round(0)
                     hordf['VAV'] = hordf['VAV'].round(0)
-                    
+
                     zcfname = fname + '_zc.txt'
                     hordf.to_csv(zcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(zcfname))
-        
+
         # else:
            # listdatain(xy,t)
         if cmdl.qcfilename:
@@ -1036,7 +927,7 @@ def main():
                     fltfilename = fname +'_zconv.txt'
                     list_kngdmflt(fltfilename,xy,zc,segid,fltname)
                     print('Successfully saved {}'.format(fltfilename))
-            else:    
+            else:
 
 
                 if cmdl.timeconvert:
@@ -1047,7 +938,7 @@ def main():
                     hordf['QA0'] = q0
                     hordf['QA1'] = q1
                     hordf['QA2'] = q2
-                    
+
                     hordf['T1W'] = hordf['T1W'].round(3)
                     hordf['T2w'] = hordf['T2w'].round(0)
                     hordf['VAV'] = hordf['VAV'].round(0)
@@ -1057,12 +948,12 @@ def main():
                     hordf['QA0'] = hordf['QA0'].round(0)
                     hordf['QA1'] = hordf['QA1'].round(0)
                     hordf['QA2'] = hordf['QA2'].round(0)
-                    
-                    
+
+
                     tcfname = fname + '_tcqf.txt'
                     hordf.to_csv(tcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(tcfname))
-                    
+
                 else:
                     zc,vav,q0,q1,q2 = zconvfile(xy,t,xyqc,qcoef)
                     hordf['Z'] = zc
@@ -1070,20 +961,20 @@ def main():
                     hordf['QA0'] = q0
                     hordf['QA1'] = q1
                     hordf['QA2'] = q2
-                    
-                    
-                    
+
+
+
                     hordf['Z'] = hordf['Z'].round(0)
                     hordf['VAV'] = hordf['VAV'].round(0)
                     hordf['QA0'] = hordf['QA0'].round(0)
                     hordf['QA1'] = hordf['QA1'].round(0)
                     hordf['QA2'] = hordf['QA2'].round(0)
-                    
-                    
+
+
                     zcfname = fname +'_zcqf.txt'
                     hordf.to_csv(zcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(zcfname))
-                    
+
         elif cmdl.afiles: #3 coef files
 
             if cmdl.coeffiletype == 'surfer':  # 3 surfer grid coef files
@@ -1111,7 +1002,7 @@ def main():
                     fltfilename = fname +'_zconv.txt'
                     list_kngdmflt(fltfilename,xy,zc,segid,fltname)
                     print('Successfully saved {}'.format(fltfilename))
-            else:    
+            else:
 
 
                 if cmdl.timeconvert:
@@ -1122,7 +1013,7 @@ def main():
                     hordf['QA0'] = q0
                     hordf['QA1'] = q1
                     hordf['QA2'] = q2
-                    
+
                     hordf['T1W'] = hordf['T1W'].round(3)
                     hordf['T2w'] = hordf['T2w'].round(0)
                     hordf['VAV'] = hordf['VAV'].round(0)
@@ -1132,9 +1023,9 @@ def main():
                     hordf['QA0'] = hordf['QA0'].round(0)
                     hordf['QA1'] = hordf['QA1'].round(0)
                     hordf['QA2'] = hordf['QA2'].round(0)
-                    
-                    
-                    
+
+
+
                     tcfname = fname + '_tcqf.txt'
                     hordf.to_csv(tcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(tcfname))
@@ -1145,15 +1036,15 @@ def main():
                     hordf['QA0'] = q0
                     hordf['QA1'] = q1
                     hordf['QA2'] = q2
-                    
+
                     hordf['Z'] = hordf['Z'].round(0)
                     hordf['VAV'] = hordf['VAV'].round(0)
                     hordf['QA0'] = hordf['QA0'].round(0)
                     hordf['QA1'] = hordf['QA1'].round(0)
                     hordf['QA2'] = hordf['QA2'].round(0)
-                    
-                    
-                    
+
+
+
                     zcfname = fname +'_zcqf.txt'
                     hordf.to_csv(zcfname,index=False,sep=' ')
                     print('Successfully saved {}'.format(zcfname))
