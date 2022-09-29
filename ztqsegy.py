@@ -1,138 +1,23 @@
 import sys, os.path
 import argparse
+from argparse import HelpFormatter,RawTextHelpFormatter
 import numpy as np
+import matplotlib.pyplot as plt
 from math import sqrt, fabs
-from scipy.spatial import cKDTree as KDTree
+from scipy.spatial import cKDTree
+from scipy.interpolate import griddata
 import pandas as pd
+from sklearn.neighbors import KDTree
 import segyio
 from shutil import copyfile
 from scipy import interpolate
 from datetime import datetime
+import time
+import logging
+from tqdm import tqdm
+from matplotlib.backends.backend_pdf import PdfPages
 
 
-
-"""
-Depth conversion using quadratic equation
-
-5/Mar/2012 11:25 : created zqcon.py
-10/Mar/2012 20:49 : added time conversion
-
-+Sample input file: k1tx3.lst
-   503872.34   2925323.47       1602
-   504870.21   2924325.58       1593
-   505868.09   2925323.47       1582
-   506865.96   2928317.12       1577
-   506865.96   2925323.47       1575
-   506865.96   2922329.81       1592
-   507863.83   2927319.24       1571
-   507863.83   2924325.58       1567
-
-+Sample coefficient file: qcoef.dat
-   571199.80    2919956.00     -43.385    7719.345    6801.382       0.000    7520.170    7005.920            NF-4A      0.026       0.754         131        9665
-   567835.30    2937475.50     -96.197    8094.850    6135.446       0.000    7663.217    6568.652             NF-5      0.026       0.771         130        9819
-   594051.20    2834248.00     191.077    7404.620    7306.613       0.000    8243.639    6484.981           NF-6AA      0.017       0.791          87       10688
-   602468.00    2928893.00    -269.791    7509.786    7394.564       0.000    6346.340    8546.043            NFB-1      0.035       0.755         179        9576
-   607200.90    2926207.00      77.392    6634.064    7452.582       0.000    6966.907    7126.673           NFB-19      0.036       0.774         181        9710
-   607206.70    2926206.10     -61.118    6949.164    7326.107       0.000    6700.548    7560.820           NFB-25      0.036       0.777         182        9752
-   631608.00    2893358.00     109.695    6781.596    7002.654       0.000    7218.535    6606.951           NFD-1B      0.034       0.838         173       10759
-this file was generated from wvel.py
-
->python qzcon0.py -fk1tx3.lst  -q 0 1 2 3 4 -eqcoef.dat
-
-+ To time convert a depth file with spatially varying coef
-Sample input file : k1tz.dat
-   537800.00    2902372.09       0.667        8449        12668         155        7407        7539
-   537800.00    2899378.44       0.665        8492        12760         191        7170        7970
-   537800.00    2896384.78       0.658        8440        12816         222        6953        8391
-   538797.87    2964241.01       0.779        9558        12269         -92        7454        6332
-   538797.87    2961247.36       0.765        9351        12215         -82        7693        6047
-   538797.87    2958253.70       0.746        9021        12101         -85        7862        5838
-   538797.87    2955260.04       0.743        8988        12096         -86        7980        5696
-   538797.87    2952266.38       0.741        8957        12096         -86        8048        5623
-   538797.87    2949272.73       0.728        8768        12044         -85        8076        5610
-   538797.87    2946279.07       0.732        8868        12115         -73        8170        5525
-   538797.87    2943285.41       0.721        8747        12141         -65        8194        5604
-
-
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3 -t -eqcoef.dat -q 0 1 2 3 4
-
-+ To depth convert using a single function:
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3  -c 38 7052 6994
-
-
-+ To time convert using a single function:
-C:\sekpy\velocity>python qzcon0.py -fk1tz.dat -d 0 1 3 -t -c 38 7052 6994
-
-+using monte carlo simulation us -S standard deviation for 3 coefs and percentile to
-    compute at -P 0.15 and resample grid every 3rd value. Input data is in Surfer grid format
-C:\\Users\20504\sami\SEKDATA\wdata>python ztqmc.py -f 10REG_SUDSH_400X_grid.grd
--i surfer -c 0.000    7591.537    6573.168 -S 0.0 650 700 -T -2.0 2.0  -P 0.15
--G 3
-
-
-+input is zmap grid sampled every 2nd point
-C:\\Users\20504\sami\SEKDATA\wdata>python ztqmc.py -f 10REG_SUDSH_400X_grid.dat -
-i zmap -c 0.000    7591.537    6573.168 -S 0.0 650 700 -T -2.0 2.0  -P 0.90 -G 2
- >10REG_SUDSH_400X_grid_p90x2.lst
-
-
-+ztqmc.py has changed after that: triggering monte carlo by using -R
-
-+ depth conversion using monte carlo of a surfer grid
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -fsdtba.grd -i surfer
--c 0.000    7591.537    6573.168 -R -S 0.0 650 700 -T -2.0 2.0  -P 0.85 > t
-
-+time conversion using monte carlo. -F plotting of histograms does not show?? resulting
-    data seems ok.
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -f t -i xyz -c 0.000
-  7591.537    6573.168 -R -S 0.0 650 700 -T -2.0 2.0  -P 0.85 -t -F
-
-+straight time conversion
-C:\\Users\Administrator\sekdata\velocities>python ztqmc.py -f t -i xyz -c 0.000
-  7591.537    6573.168 -t
-
-*** In depth conversion the input time is assumed t2way. The output is listed as t1w
-
-*** In time conversion the output is listed as t1way
-10/Mar/2012 21:06 done editing saved as qzcon.py
-11/Mar/2012 8:45: changed name to ztq.py
-28/Feb/2013 8:08 added t2w in ms to listing of both time and depth conversion
-    modified listing to be x y z t1w t2w vav ....
-19/Mar/2013 13:24  added onse space before listing in print to match to wvel.py output
-28/Apr/2013 8:10 added space to printing to mathch wvel.py listing
-28/Jan/2015 added surfer grid input and probability monte carlo
-    modified all functions to print internally and not return data
-    added input coef files from surfer grid
-29/Jan/2015: changed a lot of command line options. Added input zgrid for both data
-    and coef files.
-01 Feb 2015: added printing to stderr every 100 point. Changed # of mcruns to 250 only
-    added plotting of histogram and fitted pdf for every point. To exit use ctrl C
-09 Feb 2015: added -R to switch on Monte Carlo simulation
-    added discrete distribution of simulated zmc
-10 feb 2015: fitted a continous norm distribution to mc'd z and t
-    found the pctl from the norm distribution.
-    Plotting of depth conversion is OK but in time conversion is a problem?
-    data seems to convert both ways OK
-
-*depth to time conversion with 1 qcoefs
-python ztqmc.py time1300.txt --datahdrlines 1 --timeconvert --datafiletype xyz --datacols 1 2 4 --qcoefs 0 4750 3400
-*time to depth conversion with 1 qcoefs
-python ztqmc.py time1300.txt --datahdrlines 1 --datafiletype xyz --datacols 1 2 3 --qcoefs 0 4750 3400
-
-*time to depth conversion with quadratic coeffs file
-python ztqmc.py time1300.txt --datahdrlines 1  --datafiletype xyz --datacols 1 2 4 --qcfilename time1300.txt --qchdrlines 1 --qccols 1 2 6 7 8 --timeconvert
-
-*depth convert to time using quadratic coeffs file
-python ztqmc.py time1300.txt --datahdrlines 1  --datafiletype xyz --datacols 1 2 3 --qcfilename time1300.txt --qchdrlines 1 --qccols 1 2 6 7 8
-
-python ztq.py time1300.txt --datacols 1 2 3 --datahdrlines 1 --qcfilename time1300.txt --qccols 1 2 6 7 8
-
-python ztqsegy.py aix.sgy --datafiletype segy --qcoefs 0 4740 3440
-
-python ztqsegy.py aix.sgy --datafiletype segy --qcfilename time1300_tcqf.txt --qccols 0 1 6 7 8 --outrange 0 12000
-python ztqsegy.py UL30.dat --datafiletype xyz --datacols 0 1 2 --datahdrlines 20 --qcfilename P7300_999_FINAL_STACKING_VEL_zvr_qcf.txt --qchdrlines 1 --qccols 1 2 6 7 8
-
-"""
 
 def quadeval(cf,xi):
     """
@@ -242,9 +127,9 @@ def qhull(sample):
             return base
 
     if len(sample) > 2:
-    	axis = sample[:,0]
-    	base = np.take(sample, [np.argmin(axis), np.argmax(axis)], 0)
-    	return link(dome(sample, base),dome(sample, base[::-1]))
+        axis = sample[:,0]
+        base = np.take(sample, [np.argmin(axis), np.argmax(axis)], 0)
+        return link(dome(sample, base),dome(sample, base[::-1]))
     else:
         return sample
 
@@ -292,64 +177,65 @@ def pip(x,y,poly):  #point_in_poly
 
 #...............................................................................
 class Invdisttree:
-    """ inverse-distance-weighted interpolation using KDTree:
-invdisttree = Invdisttree( X, z )  -- data points, values
-interpol = invdisttree( q, nnear=3, eps=0, p=1, weights=None, stat=0 )
-    interpolates z from the 3 points nearest each query point q;
-    For example, interpol[ a query point q ]
-    finds the 3 data points nearest q, at distances d1 d2 d3
-    and returns the IDW average of the values z1 z2 z3
+    """ 
+    inverse-distance-weighted interpolation using KDTree:
+    invdisttree = Invdisttree( X, z )  -- data points, values
+    interpol = invdisttree( q, nnear=3, eps=0, p=1, weights=None, stat=0 )
+        interpolates z from the 3 points nearest each query point q;
+        For example, interpol[ a query point q ]
+        finds the 3 data points nearest q, at distances d1 d2 d3
+        and returns the IDW average of the values z1 z2 z3
+            (z1/d1 + z2/d2 + z3/d3)
+            / (1/d1 + 1/d2 + 1/d3)
+            = .55 z1 + .27 z2 + .18 z3  for distances 1 2 3
+
+        q may be one point, or a batch of points.
+        eps: approximate nearest, dist <= (1 + eps) * true nearest
+        p: use 1 / distance**p
+        weights: optional multipliers for 1 / distance**p, of the same shape as q
+        stat: accumulate wsum, wn for average weights
+
+    How many nearest neighbors should one take ?
+    a) start with 8 11 14 .. 28 in 2d 3d 4d .. 10d; see Wendel's formula
+    b) make 3 runs with nnear= e.g. 6 8 10, and look at the results --
+        |interpol 6 - interpol 8| etc., or |f - interpol*| if you have f(q).
+        I find that runtimes don't increase much at all with nnear -- ymmv.
+
+    p=1, p=2 ?
+        p=2 weights nearer points more, farther points less.
+        In 2d, the circles around query points have areas ~ distance**2,
+        so p=2 is inverse-area weighting. For example,
+            (z1/area1 + z2/area2 + z3/area3)
+            / (1/area1 + 1/area2 + 1/area3)
+            = .74 z1 + .18 z2 + .08 z3  for distances 1 2 3
+        Similarly, in 3d, p=3 is inverse-volume weighting.
+
+    Scaling:
+        if different X coordinates measure different things, Euclidean distance
+        can be way off.  For example, if X0 is in the range 0 to 1
+        but X1 0 to 1000, the X1 distances will swamp X0;
+        rescale the data, i.e. make X0.std() ~= X1.std() .
+
+    A nice property of IDW is that it's scale-free around query points:
+    if I have values z1 z2 z3 from 3 points at distances d1 d2 d3,
+    the IDW average
         (z1/d1 + z2/d2 + z3/d3)
         / (1/d1 + 1/d2 + 1/d3)
-        = .55 z1 + .27 z2 + .18 z3  for distances 1 2 3
-
-    q may be one point, or a batch of points.
-    eps: approximate nearest, dist <= (1 + eps) * true nearest
-    p: use 1 / distance**p
-    weights: optional multipliers for 1 / distance**p, of the same shape as q
-    stat: accumulate wsum, wn for average weights
-
-How many nearest neighbors should one take ?
-a) start with 8 11 14 .. 28 in 2d 3d 4d .. 10d; see Wendel's formula
-b) make 3 runs with nnear= e.g. 6 8 10, and look at the results --
-    |interpol 6 - interpol 8| etc., or |f - interpol*| if you have f(q).
-    I find that runtimes don't increase much at all with nnear -- ymmv.
-
-p=1, p=2 ?
-    p=2 weights nearer points more, farther points less.
-    In 2d, the circles around query points have areas ~ distance**2,
-    so p=2 is inverse-area weighting. For example,
-        (z1/area1 + z2/area2 + z3/area3)
-        / (1/area1 + 1/area2 + 1/area3)
-        = .74 z1 + .18 z2 + .08 z3  for distances 1 2 3
-    Similarly, in 3d, p=3 is inverse-volume weighting.
-
-Scaling:
-    if different X coordinates measure different things, Euclidean distance
-    can be way off.  For example, if X0 is in the range 0 to 1
-    but X1 0 to 1000, the X1 distances will swamp X0;
-    rescale the data, i.e. make X0.std() ~= X1.std() .
-
-A nice property of IDW is that it's scale-free around query points:
-if I have values z1 z2 z3 from 3 points at distances d1 d2 d3,
-the IDW average
-    (z1/d1 + z2/d2 + z3/d3)
-    / (1/d1 + 1/d2 + 1/d3)
-is the same for distances 1 2 3, or 10 20 30 -- only the ratios matter.
-In contrast, the commonly-used Gaussian kernel exp( - (distance/h)**2 )
-is exceedingly sensitive to distance and to h.
+    is the same for distances 1 2 3, or 10 20 30 -- only the ratios matter.
+    In contrast, the commonly-used Gaussian kernel exp( - (distance/h)**2 )
+    is exceedingly sensitive to distance and to h.
 
     """
-# anykernel( dj / av dj ) is also scale-free
-# error analysis, |f(x) - idw(x)| ? todo: regular grid, nnear ndim+1, 2*ndim
+    # anykernel( dj / av dj ) is also scale-free
+    # error analysis, |f(x) - idw(x)| ? todo: regular grid, nnear ndim+1, 2*ndim
 
     def __init__( self, X, z, leafsize=10, stat=0 ):
         assert len(X) == len(z), "len(X) %d != len(z) %d" % (len(X), len(z))
-        self.tree = KDTree( X, leafsize=leafsize )  # build the tree
+        self.tree = cKDTree( X, leafsize=leafsize )  # build the tree
         self.z = z
         self.stat = stat
         self.wn = 0
-        self.wsum = None;
+        self.wsum = None
 
     def __call__( self, q, nnear=6, eps=0, p=1, weights=None ):
             # nnear nearest neighbours of each query point --
@@ -383,9 +269,9 @@ is exceedingly sensitive to distance and to h.
 
 def idw(xy,vr,xyi):
 
-#    xyt,vr=datain('aqv3stk2.lst')
-#    print "size of xyt %10d , size of vr %10d" % (xyt[:,0].size,vr.size)
-#   xyti=data2in('k1tx3.lst')
+    # xyt,vr=datain('aqv3stk2.lst')
+    # print "size of xyt %10d , size of vr %10d" % (xyt[:,0].size,vr.size)
+    # xyti=data2in('k1tx3.lst')
     # N = vr.size
     # # Ndim = 2
     # Nask = N  # N Nask 1e5: 24 sec 2d, 27 sec 3d on mac g4 ppc
@@ -414,8 +300,8 @@ def surfergrid2xyz(fname,nullvalue,mltp,nskip):
     zmin,zmax=list(map(float,header4.split()))
     xinc=(xmax-xmin)/(xnodes-1)
     yinc=(ymax -ymin)/(ynodes-1)
-#    print xnodes, ynodes, xmin, xmax, ymin,ymax, zmin, zmax
-#   print xinc, yinc
+    # print xnodes, ynodes, xmin, xmax, ymin,ymax, zmin, zmax
+    # print xinc, yinc
 
     # ycounter=0
     # xcounter=0
@@ -433,8 +319,8 @@ def surfergrid2xyz(fname,nullvalue,mltp,nskip):
                         z.append(zc)
                         xy.append((xc,yc))
                     k += 1
-#                    print "j: %5d  k:%5d  xc:%12.2f  yc: %12.2f  z:%10s"\
-#                    %(j,k,xc,yc,flds[m])
+                    # print "j: %5d  k:%5d  xc:%12.2f  yc: %12.2f  z:%10s"\
+                    # %(j,k,xc,yc,flds[m])
 
     fgrid.close()
     xyarray=np.array(xy[::nskip][:])
@@ -452,7 +338,7 @@ def zmapgridin(fname,mltp,nskip):
     firstat=True
     while header==True:
         line=fgrid.readline()
-#        print(line[:-1])
+        # print(line[:-1])
         flds=line.split()
         if (flds[0][0]=='@' and firstat):
             firstat=False
@@ -469,23 +355,24 @@ def zmapgridin(fname,mltp,nskip):
             maxy=float(line2flds[5])
             dx=(maxx-minx)/ncols
             dy=(maxy-miny)/nrows
-#            print( dx,dy)
-        elif (flds[0][0]=='@' and firstat==False):#add check for + in zmap grid
-                                                #just delete line with + from grid
+            # print( dx,dy)
+        elif (flds[0][0]=='@' and firstat==False):
+            # add check for + in zmap grid
+            # just delete line with + from grid
             header=False
     xstart=minx
     ystart=maxy
 
     zval=[]
     nlines=0
-#    print ("Null value %s ", nullval)
+    # print ("Null value %s ", nullval)
     for line in fgrid:
-#        if line[0][0] != ' ':
-#            continue
-#9/Jul/2012 13:06 removed it and prog works OK
+        #    if line[0][0] != ' ':
+        #        continue
+        # 9/Jul/2012 13:06 removed it and prog works OK
         lineflds=line.split()
         nlines= nlines+1
-#        print(nlines,lineflds)
+        # print(nlines,lineflds)
 
 
         for i in range(len(lineflds)):
@@ -496,17 +383,17 @@ def zmapgridin(fname,mltp,nskip):
     for i in range(ncols):
         for j in range(nrows):
             k=k+1
-#            print "k: %5d" % k
+            # print "k: %5d" % k
             if str(zval[k])== nullval:
                 pass
-#                print(zval[i+j],nullval)
+                # print(zval[i+j],nullval)
             else:
                 xc= xstart + i * dx
                 yc = ystart - j * dy
-#                print("%10.2f %10.2f %10.0f " % (float(xc),float(yc), float(zval[k])))
+                # print("%10.2f %10.2f %10.0f " % (float(xc),float(yc), float(zval[k])))
                 xy.append((xc,yc))
                 z.append(float(zval[k]))
-#    print("len of xyz:",len(xyz))
+    # print("len of xyz:",len(xyz))
     fgrid.close()
     #xyarray=np.array(xy[::nskip][::nskip])
     xyarray=np.array(xy[::nskip][:])
@@ -572,8 +459,7 @@ def listtconv(xy,t1w,z,a0,a1,a2):
     vav= z/t1w
     t2w= t1w *2000.0
     for i in range(z.size):
-        print(" %12.2f  %12.2f  %10.0f  %10.3f   %10.0f  %10.0f  %10.0f  %10.0f " %\
-        (xy[i,0],xy[i,1],z[i],t1w[i],t2w[i],vav[i],a0[i],a1[i],a2[i]))
+        print(f"{xy[i,0]:.12.2f} {xy[i,1]:12.2f}  {z[i]:10.0f} {t1w[i]:10.3f}  {t2w[i]:10.0f}  {vav[i]:10.0f} {a0[i]:10.3f} {a1[i]:10.3f} {a2[i]:10.3f} " )
 
 
 
@@ -636,6 +522,7 @@ def tconv1xyz(xy,z,qc,kflt=False):
         vav[i]=z[i]/t0[i]
         # t2w= t0[i] * 2000.0
     return t0, vav
+
 
 
 def segyzconvfile(xy,t,xyqc,qcoef):
@@ -764,21 +651,329 @@ def tconvqfile(xy,z,xy0,a0,xy1,a1,xy2,a2):
         vav[i]=z[i]/t1w[i]
     return t1w,vav,a0list,a1list,a2list
 
+def plot_zdf(zdf,pdfn,trnum=1000):
+    fig,ax = plt.subplots(1,4,figsize=(10,8),sharey=True)
+    ax[0].invert_yaxis()
+    ax[0].plot(zdf.TRACEORIG,zdf.Z)
+    ax[0].set_ylabel('DEPTH')
+    ax[0].set_xlabel('LogData')
+
+    ax[1].plot(zdf.TRACEZ,zdf.Z)
+    ax[1].set_ylabel('DEPTH')
+    ax[1].set_xlabel('SonicData')
+
+    ax[2].plot(zdf.TWT,zdf.Z)
+    ax[2].set_ylabel('DEPTH')
+    ax[2].set_xlabel('TWT msec')
+
+    ax[3].plot(zdf.TRACEV,zdf.Z)
+    ax[3].set_ylabel('DEPTH')
+    ax[3].set_xlabel('VAV')
+    
+    fig.suptitle(f'Trace # {trnum}')
+    fig.tight_layout()
+    pdfn.savefig()
+    plt.close()
+    
+
+def plot_tdf(trmeddf,pdfn,trnum=200):
+    fig,ax = plt.subplots(1,4,figsize=(10,8),sharey=True)
+    ax[0].invert_yaxis()
+    ax[0].plot(trmeddf.TRORIG,trmeddf.index)
+    ax[0].set_ylabel('TWT s')
+    ax[0].set_xlabel('LogData')
+
+    ax[1].plot(trmeddf.TR,trmeddf.index)
+    ax[1].set_ylabel('TWT s')
+    ax[1].set_xlabel('SonicData')
+
+    ax[2].plot(trmeddf.Z,trmeddf.index)
+    ax[2].set_ylabel('TWT s')
+    ax[2].set_xlabel('Z CUMSUM')
+
+    ax[3].plot(trmeddf.VAV,trmeddf.index)
+    ax[3].set_ylabel('TWT s')
+    ax[3].set_xlabel('VAV')
+    
+    fig.suptitle(f'Trace #: {trnum}')
+    fig.tight_layout()
+    pdfn.savefig()
+    plt.close()
+
+def get_xytr(fname,xhdr=73,yhdr=77,xyscalerhdr=71):
+    xclst = list()
+    yclst = list()
+    trlst = list()
+    with segyio.open(fname,'r',ignore_geometry= True) as srcp:
+        for trnum,tr in enumerate(srcp.trace):
+            xysc = np.fabs(srcp.header[trnum][xyscalerhdr])
+            xclst.append(srcp.header[trnum][xhdr]/ xysc)
+            yclst.append(srcp.header[trnum][yhdr]/ xysc)
+            trlst.append(trnum)
+    return np.array([xclst,yclst]).T,np.array(trlst)
+
+
+
+def dtsegyconvert(datasegyfname,dtsegyfname,
+    outrange=[0,1000],
+    shallowvel=6000.0,
+    xhdr=73,
+    yhdr=77,
+    xyscalerhdr=71,
+    smoothradius=50,
+    timeconvert=False,
+    plotinc=50000,
+    version='v0',
+    outdir=None):
+    dirsplit,fextsplit= os.path.split(datasegyfname)
+    fname,fextn= os.path.splitext(fextsplit)
+
+    isamplechk = check_sampleinterval(datasegyfname,outrange)
+
+
+    # use version to update file name with e.g. P10 for various probabilities
+    if outdir:
+        outfnamec = os.path.join(outdir,fname) + f"SR{isamplechk}{version}_sonz.sgy"
+        outvfnamec = os.path.join(outdir,fname) + f"SR{isamplechk}{version}_sonv.sgy"
+        pdfname = os.path.join(outdir,fname) + f"SR{isamplechk}{version}_ZTV.pdf"
+    else:
+        outfnamec = os.path.join(dirsplit,fname) + f"SR{isamplechk}{version}_sonz.sgy"
+        outvfnamec = os.path.join(dirsplit,fname) + f"SR{isamplechk}{version}_sonv.sgy"
+        pdfname = os.path.join(dirsplit,fname) + f"SR{isamplechk}{version}_ZTV.pdf"
+    print('Copying file, please wait ........')
+    start_copy = datetime.now()
+    copyfile(datasegyfname, outfnamec)
+    copyfile(datasegyfname, outvfnamec)
+    end_copy = datetime.now()
+    print('Duration of copying: {}'.format(end_copy - start_copy))
+
+    xyc,trnall = get_xytr(dtsegyfname,
+        xhdr=xhdr,
+        yhdr=yhdr,
+        xyscalerhdr=xyscalerhdr)
+
+    segytree = KDTree(xyc,leaf_size=20)        
+
+
+
+    with segyio.open(datasegyfname, "r" ,strict=False) as src,\
+        segyio.open(dtsegyfname, "r" ,strict=False) as dtsegy:
+        sr = segyio.tools.dt(src) /1000
+        srsec = sr / 1000.0
+        sr1wsec = sr / 2000.0
+        ns = src.samples.size
+        twt = src.samples
+        _,isample = np.linspace(outrange[0],outrange[1],num= ns,retstep =True)
+
+        isample = int(isample) + 1
+        # to make sure that num samples are less than max samples in segy
+
+
+
+        with segyio.open(outfnamec, "r+" ,strict=False) as srcp, \
+            segyio.open(outvfnamec, "r+" ,strict=False) as srcv:
+            # nt = segyio.tools.sample_indexes(srcp)
+
+            zci0= np.arange(outrange[0],outrange[1],isample,dtype=np.float32)
+            pade = ns - zci0.shape[0]
+            zci = np.pad(zci0,(0,pade),'constant',constant_values=(0,0))
+            print(f'New sample interval: {isample}, # of original samples {zci0.shape},  # of samples {zci.shape}, pade {pade}' )
+            logging.info(f'New sample interval: {isample}, # of original samples {zci0.shape},  # of samples {zci.shape}, pade {pade}' )
+            # print('len of zci',zci.size)
+            print(f'min zci {zci.min()}  max zci {zci.max()}')
+            logging.info(f'min zci {zci.min()}  max zci {zci.max()}')
+            with PdfPages(pdfname) as pdf:
+                for trnum,tr in enumerate(tqdm(src.trace,desc='Processing Trace',total=len(src.trace))):
+                    # print('Trace #: {}'.format(trnum))
+                    # print('Trace #: {} {}'.format(trnum,fb[trnum]))
+                    firstnonzero = tr[np.where(tr > 0)[0][0]] # find index of first non zero
+                    # print(f'firstnonzero:{firstnonzero}')
+                    tr[np.where(tr == 0)] = firstnonzero
+
+                    # trdt = dtsegy.trace[trnum] # trace from sonic segy
+                    # firstdtnonzero = trdt[np.where(trdt > 0)[0][0]]
+                    # firstvel = sr1wsec * 10e5 / firstdtnonzero
+                    # # print(f'firstdtnonzero:{firstdtnonzero}, firstvel: {firstvel}')
+                    # # trdt[np.where(trdt == 0)] = shallowdt   
+                    # # trdt[np.where(trdt == 0)] = np.median(trdt)   
+                    
+                    # trdt[np.where(trdt == 0)] = firstdtnonzero
+                    # dtzc = np.zeros(len(tr))
+                    # dtzc[1:] = np.cumsum(sr1wsec * 10e5 / trdt[1:]) 
+                    
+                    # dtvav = np.zeros(len(dtzc))
+                    # dtvav[1:] = dtzc[1:] / (twt[1:] / 2000.0)               
+                    # dtvav[0] = dtvav[1]
+
+                    if trnum == 0:
+                        trndxe = 1
+                        trndxs = 0
+                    else:
+                        trndxe = trnum 
+                        trndxs = trnum -1
+                    trndx = segytree.query_radius(xyc[trndxs:trndxe,:], 
+                        smoothradius,count_only=False,return_distance=False)
+                    if trnum % plotinc == 0:
+                        logging.info(f'Trace#: {trnum} Num of traces for smoothing: {len(trndx[0])}')
+                    twttrdflst = []
+                    for i in range(len(trndx[0])):
+                        trdt = dtsegy.trace[trndx[0][i]]
+                        twttrdflst.append(pd.DataFrame({'TRNUM':trndx[0][i],'TWT': twt,'TR':trdt}))
+                    twttrdf = pd.concat(twttrdflst)
+
+
+                    trmeddf = twttrdf.groupby('TWT').median()
+                    trmeddf['TRORIG'] = tr # original trace to be depth converted from src
+                    trmeddf.TR.replace(to_replace= 0,value = np.nan,inplace=True)
+
+                    trmeddf.dropna(inplace=True)
+                    # t1w = trmeddf.TWT.to_numpy() / 2000.0
+                    # dtsonic = trmeddf.TR.to_numpy() 
+                    # z = np.zeros_like(t1w)
+                    # tstep = np.diff(t1w)[2]
+                    # # print(f'Trace# : {trn}, time sampling interval: {tstep}')
+                    
+                    # for i in range(1,t1w.shape[0]):
+                    #     z[i] = z[i-1] + tstep * (1000000.0 / dtsonic[i] )
+
+                    # breakpoint()
+                    # trmeddf.loc[(trmeddf.TR < 20),'TR'] = trmeddf.TR.median() 
+                    trmeddf.loc[((trmeddf.TR < 20) & (trmeddf.index <= trmeddf.index.min())),'TR'] = trmeddf.TR.median() 
+                    shallow_time = trmeddf.index.min()/2000.0
+                    shallow_depth = shallow_time * shallowvel
+
+                    # trmeddf['DZ'] = np.diff(trmeddf.index.to_numpy(),prepend=sr1wsec)/2000.0 * (10e5 / trmeddf.TR)
+                    trmeddf['DZ'] = np.diff(trmeddf.index.to_numpy(),prepend=shallow_depth)/2000.0 * (10e5 / trmeddf.TR)
+                    trmeddf['Z'] = trmeddf.DZ.cumsum()
+                    trmeddf['VAV'] = trmeddf.Z / (trmeddf.index/ 2000.0)
+                    zconv = trmeddf.Z.to_numpy()
+                    tconv = trmeddf.index.to_numpy()
+                    pads = int(tconv.min()/sr)
+                    pade = 0
+                    padszval = zconv[0]
+                    padstval = tconv[0]
+                    padded_z = np.pad(zconv,(pads,pade),'constant',constant_values=(padszval,0))
+                    padded_t = np.pad(tconv,(pads,pade),'constant',constant_values=(padstval,0))
+
+
+
+                    zi1d = interpolate.interp1d(trmeddf.Z.values,trmeddf.TR.values,
+                        kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi1d = interpolate.interp1d(dtzc,trdt,kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi1d = interpolate.interp1d(dtzc,trdt,kind='linear',bounds_error= False, fill_value = np.median(trdt))
+                    # zi1d = interpolate.interp1d(dtzc,trdt,kind='linear',bounds_error= False, fill_value = firstdtnonzero)
+                    trzci = zi1d(zci).astype('float32')
+
+
+                    zi1d = interpolate.interp1d(trmeddf.Z.values,trmeddf.VAV.values,
+                        kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi1d = interpolate.interp1d(dtzc,dtvav,kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi1d = interpolate.interp1d(dtzc,dtvav,kind='linear',bounds_error= False, fill_value = np.median(dtvav))
+                    # zi1d = interpolate.interp1d(dtzc,dtvav,kind='linear',bounds_error= False, fill_value = (dtvav[0],np.median(dtvav)))
+                    trvci = zi1d(zci).astype('float32')
+
+
+                    zi2d = interpolate.interp1d(trmeddf.Z,trmeddf.TRORIG,
+                        kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi2d = interpolate.interp1d(dtzc,tr,kind='linear',bounds_error= False, fill_value = np.nan)
+                    # zi2d = interpolate.interp1d(dtzc,tr,kind='linear',bounds_error= False, fill_value = firstnonzero)
+                    # zi2d = interpolate.interp1d(dtzc,tr,kind='linear',bounds_error= False, fill_value = np.median(tr))
+                    trzciorig = zi2d(zci).astype('float32')
+                    
+                    tzi = interpolate.interp1d(trmeddf.Z,trmeddf.index,
+                        kind='linear',bounds_error= False, fill_value = np.nan)
+                    # t1w = twt / 2.0
+                    # tzi = interpolate.interp1d(dtzc,twt,kind='linear',bounds_error= False, fill_value = np.nan)
+                    # tzi = interpolate.interp1d(dtzc,twt,kind='linear',bounds_error= False, fill_value = np.median(twt))
+                    t2wz = tzi(zci).astype('float32')
+
+                    srcp.trace[trnum] = np.nan_to_num(trzciorig).astype('float32')
+                    srcv.trace[trnum] = np.nan_to_num(trvci).astype('float32')
+                    
+                    if trnum % plotinc == 0:
+                        # trtdf = pd.DataFrame({'TWT':twt,'TRACET':tr,'TRDT':trdt,'DTZCUMSUM':dtzc,'DTVAV':dtvav})
+                        trzdf = pd.DataFrame({'Z':zci,'TRACEZ':trzci,'TRACEV':trvci,'TRACEORIG':trzciorig,'TWT':t2wz}) 
+                        plot_tdf(trmeddf,pdf,trnum=trnum)
+                        # plot_tdf(trtdf,pdf,trnum=trnum)
+                        plot_zdf(trzdf,pdf,trnum=trnum)
+            
+
+            isample *= 1000
+            segyio.tools.resample(srcp,rate=int(isample),micro=True)
+            segyio.tools.resample(srcv,rate=int(isample),micro=True)
+            print('New sample interval: {},from converted file {}'.format(isample,segyio.tools.dt(srcp)) )
+            logging.info('New sample interval: {},from converted file {}'.format(isample,segyio.tools.dt(srcp)) )
+            print('New sample interval: {},from vav file {}'.format(isample,segyio.tools.dt(srcv)) )
+            logging.info('New sample interval: {},from vav file {}'.format(isample,segyio.tools.dt(srcv)) )
+            print(f'Successfully generated {pdfname}')
+            logging.info(f'Successfully generated {pdfname}')
+
+        print(f'Successfully generated {outfnamec}')
+        logging.info(f'Successfully generated {outfnamec}')
+        print(f'Successfully generated {outvfnamec}')
+        logging.info(f'Successfully generated {outvfnamec}')
+
+
+def check_sampleinterval(datasegyfname,outrange):
+    with segyio.open(datasegyfname, "r" ,strict=False) as src:
+        sr = segyio.tools.dt(src) /1000
+        srsec = sr / 1000.0
+        sr1wsec = sr / 2000.0
+        ns = src.samples.size
+        twt = src.samples
+        _,isample = np.linspace(outrange[0],outrange[1],num= ns,retstep =True)
+
+        isample = int(isample) + 1
+        # to make sure that num samples are less than max samples in segy
+        print(f'For min range of {outrange[0]} to max range of {outrange[1]}')
+        logging.info(f'For min range of {outrange[0]} to max range of {outrange[1]}')
+        print(f'Input sample interval: {sr}, Expected output sample interval: {isample}')
+        logging.info(f'Input sample interval: {sr}, Expected output sample interval: {isample}')
+    return isample
 
 
 def getcommandline():
-    parser= argparse.ArgumentParser(description='Depth Conversion using quadratic coefficients ')
-    parser.add_argument('datafilename',help='Horizon Data file to be depth or time converted')
+    try:
+        from shlex import quote as cmd_quote
+    except ImportError:
+        from pipes import quote as cmd_quote
 
+
+    ztqsegyhelp = '''
+    Depth conversion using 
+        * quadratic coefficients or
+        * dt sonic segy
+    '''
+    parser= argparse.ArgumentParser(description=ztqsegyhelp,
+        formatter_class=RawTextHelpFormatter)
+
+    datafilenamehelp = '''
+    Horizon data file in time or depth to be converted
+    '''
+    parser.add_argument('datafilename',help=datafilenamehelp)
+
+    datafiletypehelp = '''
+    nput file type: 
+        * xyz  for flat ASCII, 
+        * zmap for zmap grid, 
+        * surfer for surfer grid, 
+        * segy for segy file, 
+        * kingdom for kingdom fault file. 
+        default= %(default)s
+    '''
     parser.add_argument('--datafiletype',choices=['xyz','zmap','surfer','segy','kngdmflt'],default='xyz',
-            help='Input file type: flat ASCII, zmap grid, surfer grid, segy, kingdom fault. dfv=xyz')
+            help=datafiletypehelp)
 
-    """
-    cannot specify output format till I check if the input was a grid. flat xyz might not fit
-    a grid output format. Problem with handling null values because I remove them to compute.
-    parser.add_argument('-i','--datafiletype',choices=['xyz','zmap','zmap2surfer','surfer','surfer2zmap'],default='xyz',\
-    help='Output file type: flat ASCII, zmap in/out,zmap in/surfer out,surfer in/out,surfer in zmapout. dfv=flat ASCII')
-    """
+    
+    parser.add_argument('--sonicsegyfname',help='No quadratic computation. Use w/ segy and dt sonic segy only.default=apply quadratic')
+    parser.add_argument('--outrange',nargs = 2,type=float,default=[0,10000],
+        help='start end values of computed file, default= 0 10000')
+    parser.add_argument('--version',default='v0',help='Version code to add to file names.default=v0')
+    parser.add_argument('--shallowvel',type=float,default=6000.0,
+        help='shallow replacement velocity.dfv=6000.0')
+    parser.add_argument('--checkoutsampleinterval',action='store_true',default=False,
+        help='For the ranges given in outrange option check what output segy sample interval will be')
+    parser.add_argument('--plotinc',type=int,default=50000,help='Trace plot increment.default=50000')
     parser.add_argument('--datacols',type=int,nargs=3,default=[0,1,2],
             help=' Use if xyz flat file: xcol ycol tcol  3 values expected. dfv=0 1 2')
     parser.add_argument('--nullvalue',default='1.70141e+038',
@@ -792,7 +987,17 @@ def getcommandline():
     parser.add_argument('--segyxhdr',type=int,default=73,help='xcoord header.default=73')
     parser.add_argument('--segyyhdr',type=int,default=77,help='ycoord header. default=77')
     parser.add_argument('--xyscalerhdr',type=int,default=71,help='hdr of xy scaler to divide by.default=71')
-    parser.add_argument('--outrange',nargs = 2,type=float,default=[0,10000],help='start end values of computed file, default= 0 10000')
+
+    smoothradiushelp = '''
+    smooth radius used only with segytsonic datatype. 
+    Median of samples within radius
+    default=%(default)s
+    '''
+    parser.add_argument('--smoothradius',type=float,default=50,
+        help=smoothradiushelp)
+    # parser.add_argument('--shallowreplacement',type=float,default=127.0,
+    #     help='microsec/ft replacement of shallow zero samples.default=127.0')
+
     parser.add_argument('--outdir',help='output directory for created segy,default= same dir as input')
     parser.add_argument('--qcoefs',nargs=3,type=float,help='a0 a1 a2')
     parser.add_argument('--qcfilename',help=' One Quadratic coef flat file for all 3 coefs')
@@ -810,25 +1015,66 @@ def getcommandline():
     parser.add_argument('--agridmultipliers',nargs=3,type=float,default=(1.0,1.0,1.0),
             help='3 multipliers to a coefficients grid files. dfv= 1.0 1.0 1.0')
 
+    cmdline = '>python ' + " ".join(map(cmd_quote, sys.argv))
 
     result=parser.parse_args()
     if not result.datafilename:
         parser.print_help()
         exit()
     else:
-        return result
-
+        return result,cmdline
 
 
 def main():
-    cmdl=getcommandline()
-    #surfer grid in can have surfer grid out or zmap grid out
+    import warnings
+    warnings.filterwarnings("ignore")
+    cmdl,cmdline = getcommandline()
+
+    if cmdl.datafilename:
 
 
-    if cmdl.datafiletype =='segy':
+        clidirsplit,clifextsplit= os.path.split(cmdl.datafilename)
+        clifname,clifextn= os.path.splitext(clifextsplit)
+
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        if cmdl.outdir:
+            lfname = f'{os.path.basename(__file__)}'
+            clilogfname = os.path.join(cmdl.outdir,lfname) + f'_log.txt'
+        else:
+            lfname = f'{os.path.basename(__file__)}'
+            clilogfname = os.path.join(clidirsplit,lfname) + f'_log.txt'
+
+        logging.basicConfig(filename=clilogfname,filemode='a',level=logging.INFO,format='')
+        logging.info(f'New Run:**** {timestr} ****')
+        logging.info(f'{cmdline}')
+        start_mainjob = datetime.now()
+        logging.info(f'{start_mainjob}')
+
+    if cmdl.checkoutsampleinterval and cmdl.datafiletype=='segy':
+        outsr =  check_sampleinterval(cmdl.datafilename,cmdl.outrange)
+
+    elif cmdl.datafiletype== 'segy' and cmdl.sonicsegyfname:
+        dtsegyconvert(cmdl.datafilename,cmdl.sonicsegyfname,
+            outrange=cmdl.outrange,
+            shallowvel=cmdl.shallowvel,
+            xhdr=cmdl.segyxhdr,
+            yhdr=cmdl.segyyhdr,
+            xyscalerhdr=cmdl.xyscalerhdr,
+            smoothradius=cmdl.smoothradius,
+            plotinc=cmdl.plotinc,
+            version=cmdl.version,
+            outdir=cmdl.outdir)
+        # use version to update file name with e.g. P10 for various probabilities
+
+        end_mainjob = datetime.now()
+        print(f'********Duration of Main Run: {end_mainjob - start_mainjob}')
+        logging.info(f'********Duration of Main Run: {end_mainjob - start_mainjob}')
+
+    elif cmdl.datafiletype =='segy':
         segyfname = cmdl.datafilename
         dirsplit,fextsplit= os.path.split(cmdl.datafilename)
         fname,fextn= os.path.splitext(fextsplit)
+
         if cmdl.qcfilename:
             xyqc,qcoef=qcoefin(cmdl.qcfilename,cmdl.qccols,cmdl.qchdrlines,cmdl.qcresampleby)
             if cmdl.outdir:
@@ -883,26 +1129,25 @@ def main():
             print('Duration of copying: {}'.format(end_copy - start_copy))
 
         with segyio.open(outfnamec, "r+" ,strict=False) as srcp, segyio.open(outvfnamec, "r+" ,strict=False) as srcv:
-            mappedp = srcp.mmap()
-            mappedv = srcv.mmap()
-            if mappedp:
-                print('Sucessful mapping to memory of {}'.format(outfnamec))
-            else:
-                print('Unable to map {} to memory'.format(outfnamec))
-            if mappedv:
-                print('Sucessful mapping to memory of {}'.format(outvfnamec))
-            else:
-                print('Unable to map {} to memory'.format(outvfnamec))
             nt = segyio.tools.sample_indexes(srcp)
             nta = np.array(nt)/1000
             # print(nta.min(),nta.max())
             ns = len(srcp.trace[1])
             # print(ns)
-            zci,isample = np.linspace(cmdl.outrange[0],cmdl.outrange[1],num= ns,retstep =True)
-            print('New sample interval: {}'.format(isample) )
+            _,isample = np.linspace(cmdl.outrange[0],cmdl.outrange[1],num= ns,retstep =True)
+
+            isample = int(isample) + 1
+            # to make sure that num samples are less than max samples in segy
+
+            pade = ns - isample
+            zci0= np.arange(cmdl.outrange[0],cmdl.outrange[1],isample,dtype=np.float32)
+            zci = np.pad(zci0,(0,pade),'constant',constant_values=(0,0))
+            print(f'New sample interval: {isample}, # of samples {zci.shape}, pade {pade}' )
+            logging.info(f'New sample interval: {isample}, # of samples {zci.shape}, pade {pade}' )
             # print('len of zci',zci.size)
-            print('min zci',zci.min(),'max zci ',zci.max())
-            for trnum,tr in enumerate(srcp.trace):
+            print(f'min zci {zci.min()}  max zci {zci.max()}')
+            logging.info(f'min zci {zci.min()}  max zci {zci.max()}')
+            for trnum,tr in enumerate(tqdm(srcp.trace,desc='Processing Trace',total=len(srcp.trace))):
                 # print('Trace #: {}'.format(trnum))
                 # print('Trace #: {} {}'.format(trnum,fb[trnum]))
                 xysc = np.fabs(srcp.header[trnum][cmdl.xyscalerhdr])
@@ -955,7 +1200,13 @@ def main():
             segyio.tools.resample(srcp,rate=int(isample),micro=True)
             segyio.tools.resample(srcv,rate=int(isample),micro=True)
             print('New sample interval: {},from converted file {}'.format(isample,segyio.tools.dt(srcp)) )
+            logging.info('New sample interval: {},from converted file {}'.format(isample,segyio.tools.dt(srcp)) )
             print('New sample interval: {},from vav file {}'.format(isample,segyio.tools.dt(srcv)) )
+            logging.info('New sample interval: {},from vav file {}'.format(isample,segyio.tools.dt(srcv)) )
+
+        end_mainjob = datetime.now()
+        print(f'********Duration of Main Run: {end_mainjob - start_mainjob}')
+        logging.info(f'********Duration of Main Run: {end_mainjob - start_mainjob}')
 
     else:
         dirsplit,fextsplit= os.path.split(cmdl.datafilename)

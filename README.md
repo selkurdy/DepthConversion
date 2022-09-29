@@ -10,4 +10,10 @@ columns in one file or in three seperate files.
 _P10, P50_, and _P90_ of the corresponding coefficients. 
 
 *  **ztqsegy.py** can also read in a segy in time or depth and convert  
-that outputting another segy in the other domain.
+that outputting another segy in the other domain. 
+
+>  To integrate this program with the output of Machine learning, an option to supply a sonic dt segy is given. This sonic dt segy would have been generated with `trace2log2mb` program.
+
+>  If a time segy and a sonic segy is given then depth conversion will use both to generate a depth segy.  
+
+>  Because the sonic segy is usually noisy, you might want to smooth the resulting depth segy by using `--smoothradius` option. The radius would spatially smooth all the samples around the center and use the median. 
